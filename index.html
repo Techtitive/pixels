@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pixel Reveal Challenge</title>
+  <style>
+    body {
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    canvas {
+      display: block;
+      margin: 10px auto;
+      border: 2px solid #fff;
+      image-rendering: pixelated;
+      width: 400px;
+      height: 400px;
+    }
+    input, button {
+      margin: 5px;
+      padding: 5px 10px;
+      font-size: 0.8em;
+      background: #111;
+      color: #fff;
+      border: 1px solid #fff;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    #subscriberCount, #timer, #progressStats {
+      font-size: 0.9em;
+      margin-top: 6px;
+    }
+    #subscriberInput { width: 60px; margin-left: 6px; }
+    #optionsMenu {
+      position: fixed; top: 10px; right: 10px; z-index: 100;
+    }
+    #dropdown {
+      display: none;
+      position: absolute;
+      right: 0;
+      background: #111;
+      border: 1px solid #fff;
+      border-radius: 5px;
+    }
+    #dropdown button {
+      display: block;
+      width: 140px;
+      font-size: 0.8em;
+      background: #111;
+      text-align: left;
+      padding: 6px 10px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Revealing 1 pixel for every<br>new follower</h1>
+  <canvas id="canvas" width="316" height="316"></canvas>
+  <button onclick="handleRevealClick()">Reveal</button>
+
+  <div class="controls">
+    <div id="subscriberCount">
+      Subscribers: <span id="subCount">0</span>
+      <input type="number" id="subscriberInput" placeholder="Add" onchange="manualAddSubs()" />
+    </div>
+    <div id="progressStats">
+      Pixels Revealed: <span id="pixelCount">0</span> / 10000 |
+      <span id="percentRevealed">0%</span>
+      <span id="subsLeft"></span>
+    </div>
+    <div id="timer">Next reveal in: <span id="countdown">24:00:00</span></div>
+  </div>
+
+  <div id="optionsMenu">
+    <button onclick="toggleDropdown()">⋮</button>
+    <div id="dropdown">
+      <button onclick="document.getElementById('upload').click()">Add Image</button>
+      <button onclick="addSubscribers()">Add Subscribers</button>
+      <button onclick="resetTimer()">Reset Timer</button>
+      <button onclick="resetSubscribers()">Reset Subscribers</button>
+      <button onclick="resetAll()">Reset All</button>
+    </div>
+  </div>
+  <input type="file" id="upload" accept="image/*" style="display: none;" />
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const width = canvas.width, height = canvas.height, maxPixels = 10000;
+
+    const subCountEl = document.getElementById("subCount");
+    const pixelCountEl = document.getElementById("pixelCount");
+    const percentEl = document.getElementById("percentRevealed");
+    const subsLeftEl = document.getElementById("subsLeft");
+    const countdownEl = document.getElementById("countdown");
+
+    let imageData, originalImage;
+    let revealedPixels = new Set(JSON.parse(localStorage.getItem("revealedPixels")) || []);
+    let subscriberCount = parseInt(localStorage.getItem("subscriberCount")) || 0;
+    let timerStarted = false;
+    let countdownInterval, endTime;
+
+    subCountEl.textContent = subscriberCount;
+    updateStats();
+
+    const savedImage = localStorage.getItem("image");
+    if (savedImage) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, width, height);
+        originalImage = ctx.getImageData(0, 0, width, height);
+        if (revealedPixels.size < maxPixels) blackoutImage();
+        applyRevealedPixels();
+      };
+      img.src = savedImage;
+    }
+
+    document.getElementById("upload").addEventListener("change", (e) => {
+      const reader = new FileReader();
+      reader.onload = function (event) {
+        const img = new Image();
+        img.onload = function () {
+          ctx.drawImage(img, 0, 0, width, height);
+          originalImage = ctx.getImageData(0, 0, width, height);
+          localStorage.setItem("image", event.target.result);
+          revealedPixels = new Set();
+          localStorage.setItem("revealedPixels", "[]");
+          blackoutImage();
+          updateStats();
+        };
+        img.src = event.target.result;
+      };
+      reader.readAsDataURL(e.target.files[0]);
+    });
+
+    function blackoutImage() {
+      ctx.fillStyle = "black";
+      ctx.fillRect(0, 0, width, height);
+    }
+
+    function applyRevealedPixels() {
+      if (!originalImage) return;
+      revealedPixels.forEach(index => {
+        const x = index % width;
+        const y = Math.floor(index / width);
+        revealPixelAnimated(x, y, false);
+      });
+      if (revealedPixels.size >= maxPixels) {
+        ctx.putImageData(originalImage, 0, 0);
+      }
+    }
+
+    function revealPixelAnimated(x, y, animate = true) {
+      if (!originalImage) return;
+      const index = (y * width + x) * 4;
+      const [r, g, b] = originalImage.data.slice(index, index + 3);
+
+      if (!animate) {
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(x, y, 1, 1);
+        return;
+      }
+
+      let steps = 10;
+      let alpha = 0;
+      const duration = Math.random() * 3000;
+      const interval = duration / steps;
+
+      function fade() {
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha / steps})`;
+        ctx.fillRect(x, y, 1, 1);
+        alpha++;
+        if (alpha <= steps) setTimeout(fade, interval);
+      }
+      fade();
+    }
+
+    function revealRandomPixel() {
+      if (revealedPixels.size >= maxPixels) return;
+
+      let i, attempts = 0;
+      do {
+        i = Math.floor(Math.random() * (width * height));
+        attempts++;
+        if (attempts > 500) return;
+      } while (revealedPixels.has(i));
+
+      revealedPixels.add(i);
+      const x = i % width, y = Math.floor(i / width);
+      revealPixelAnimated(x, y);
+      localStorage.setItem("revealedPixels", JSON.stringify([...revealedPixels]));
+      updateStats();
+      if (revealedPixels.size >= maxPixels) ctx.putImageData(originalImage, 0, 0);
+    }
+
+    function handleRevealClick() {
+      revealRandomPixel();
+      if (!timerStarted) {
+        startTimer();
+        timerStarted = true;
+      }
+    }
+
+    function addSubscribers() {
+      const added = parseInt(prompt("How many new subscribers?"), 10);
+      if (isNaN(added)) return;
+      for (let i = 0; i < added; i++) revealRandomPixel();
+      subscriberCount += added;
+      subCountEl.textContent = subscriberCount;
+      localStorage.setItem("subscriberCount", subscriberCount);
+      updateStats();
+      closeDropdown();
+    }
+
+    function manualAddSubs() {
+      const input = document.getElementById("subscriberInput");
+      const added = parseInt(input.value);
+      if (!isNaN(added)) {
+        for (let i = 0; i < added; i++) revealRandomPixel();
+        subscriberCount += added;
+        subCountEl.textContent = subscriberCount;
+        localStorage.setItem("subscriberCount", subscriberCount);
+        input.value = "";
+        updateStats();
+      }
+    }
+
+    function resetSubscribers() {
+      subscriberCount = 0;
+      subCountEl.textContent = 0;
+      localStorage.setItem("subscriberCount", 0);
+      updateStats();
+      closeDropdown();
+    }
+
+    function resetAll() {
+      clearInterval(countdownInterval);
+      localStorage.clear();
+      revealedPixels = new Set();
+      subscriberCount = 0;
+      subCountEl.textContent = 0;
+      pixelCountEl.textContent = 0;
+      percentEl.textContent = "0%";
+      subsLeftEl.textContent = "";
+      ctx.clearRect(0, 0, width, height);
+      countdownEl.textContent = "24:00:00";
+      timerStarted = false;
+      closeDropdown();
+    }
+
+    function toggleDropdown() {
+      const dd = document.getElementById("dropdown");
+      dd.style.display = dd.style.display === "block" ? "none" : "block";
+    }
+
+    function closeDropdown() {
+      document.getElementById("dropdown").style.display = "none";
+    }
+
+    function updateStats() {
+      const revealed = revealedPixels.size;
+      const percent = ((revealed / maxPixels) * 100).toFixed(2);
+      pixelCountEl.textContent = revealed;
+      percentEl.textContent = `${percent}%`;
+
+      const subsLeft = Math.max(0, maxPixels - revealed);
+      subsLeftEl.textContent = revealed < maxPixels ? `| ${subsLeft} subs left` : "";
+    }
+
+    function startTimer() {
+      endTime = Date.now() + 24 * 60 * 60 * 1000;
+      countdownInterval = setInterval(updateCountdown, 1000);
+    }
+
+    function updateCountdown() {
+      const remaining = endTime - Date.now();
+      if (remaining <= 0) {
+        clearInterval(countdownInterval);
+        countdownEl.textContent = "00:00:00";
+        return;
+      }
+      const hours = String(Math.floor(remaining / (1000 * 60 * 60))).padStart(2, "0");
+      const minutes = String(Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60))).padStart(2, "0");
+      const seconds = String(Math.floor((remaining % (1000 * 60)) / 1000)).padStart(2, "0");
+      countdownEl.textContent = `${hours}:${minutes}:${seconds}`;
+    }
+
+    function resetTimer() {
+      clearInterval(countdownInterval);
+      countdownEl.textContent = "00:00:00";
+      closeDropdown();
+    }
+  </script>
+</body>
+</html>
