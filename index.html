@@ -180,13 +180,13 @@
     }
 
     function revealRandomPixel() {
-      if (revealedPixels.size >= maxPixels) return;
+      if (revealedPixels.size >= maxPixels) return false;
 
       let i, attempts = 0;
       do {
         i = Math.floor(Math.random() * (width * height));
         attempts++;
-        if (attempts > 500) return;
+        if (attempts > 500) return false;
       } while (revealedPixels.has(i));
 
       revealedPixels.add(i);
@@ -195,21 +195,34 @@
       localStorage.setItem("revealedPixels", JSON.stringify([...revealedPixels]));
       updateStats();
       if (revealedPixels.size >= maxPixels) ctx.putImageData(originalImage, 0, 0);
+      return true;
     }
 
     function handleRevealClick() {
-      revealRandomPixel();
-      if (!timerStarted) {
-        startTimer();
-        timerStarted = true;
-      }
-    }
+  const revealed = revealedPixels.size;
+  if (revealed >= subscriberCount || revealed >= maxPixels) return;
+
+  if (revealRandomPixel()) {
+    updateStats();
+  }
+
+  if (!timerStarted) {
+    startTimer();
+    timerStarted = true;
+  }
+}
+
 
     function addSubscribers() {
       const added = parseInt(prompt("How many new subscribers?"), 10);
       if (isNaN(added)) return;
-      for (let i = 0; i < added; i++) revealRandomPixel();
-      subscriberCount += added;
+
+      let revealed = 0;
+      while (revealed < added && revealedPixels.size < maxPixels) {
+        if (revealRandomPixel()) revealed++;
+      }
+
+      subscriberCount += revealed;
       subCountEl.textContent = subscriberCount;
       localStorage.setItem("subscriberCount", subscriberCount);
       updateStats();
@@ -220,8 +233,11 @@
       const input = document.getElementById("subscriberInput");
       const added = parseInt(input.value);
       if (!isNaN(added)) {
-        for (let i = 0; i < added; i++) revealRandomPixel();
-        subscriberCount += added;
+        let revealed = 0;
+        while (revealed < added && revealedPixels.size < maxPixels) {
+          if (revealRandomPixel()) revealed++;
+        }
+        subscriberCount += revealed;
         subCountEl.textContent = subscriberCount;
         localStorage.setItem("subscriberCount", subscriberCount);
         input.value = "";
